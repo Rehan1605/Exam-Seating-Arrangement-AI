@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+backend/reports/*.pdf
+frontend/exam-seating/dist/
+frontend/exam-seating/node_modules/
