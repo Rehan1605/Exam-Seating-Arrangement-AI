@@ -3,3 +3,4 @@ __pycache__/
 backend/reports/*.pdf
 frontend/exam-seating/dist/
 frontend/exam-seating/node_modules/
+stop-project.bat
