@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import AiEvaluationPanel from '../components/AiEvaluationPanel'
+import ArrangementComparison from '../components/ArrangementComparison'
 import PageContainer from '../components/PageContainer'
 import SeatingGrid from '../components/SeatingGrid'
-import { generatePdf, regenerateSeating } from '../services/api'
+import { generatePdf, regenerateSeating, selectArrangement } from '../services/api'
 
 function PreviewPage() {
   const navigate = useNavigate()
@@ -13,10 +15,17 @@ function PreviewPage() {
   const [generationFailure, setGenerationFailure] = useState(() => sessionStorage.getItem('latestGenerationError') || '')
   const [currentHall, setCurrentHall] = useState(0)
   const [isRegenerating, setIsRegenerating] = useState(false)
+  const [isSelecting, setIsSelecting] = useState(false)
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false)
   const [error, setError] = useState('')
 
-  const halls = useMemo(() => arrangement?.halls || [], [arrangement])
+  const alternatives = useMemo(() => arrangement?.arrangements || [], [arrangement])
+  const selectedId = arrangement?.selectedArrangementId || arrangement?.id
+  const activeArrangement = useMemo(
+    () => alternatives.find((item) => item.id === selectedId) || arrangement,
+    [alternatives, arrangement, selectedId],
+  )
+  const halls = useMemo(() => activeArrangement?.halls || [], [activeArrangement])
   const hall = halls[currentHall]
 
   const handleRegenerate = async () => {
@@ -24,7 +33,9 @@ function PreviewPage() {
     setError('')
 
     try {
-      const data = await regenerateSeating({})
+      const savedConstraints = sessionStorage.getItem('latestConstraints')
+      const constraints = savedConstraints ? JSON.parse(savedConstraints) : {}
+      const data = await regenerateSeating({ constraints })
       sessionStorage.setItem('latestSeatingArrangement', JSON.stringify(data.arrangement))
       setArrangement(data.arrangement)
       setCurrentHall(0)
@@ -39,6 +50,28 @@ function PreviewPage() {
       setError(regenerateError.message)
     } finally {
       setIsRegenerating(false)
+    }
+  }
+
+  const handleSelectArrangement = async (arrangementId) => {
+    if (arrangementId === selectedId) {
+      return
+    }
+    setIsSelecting(true)
+    setError('')
+    try {
+      await selectArrangement(arrangementId)
+      const nextArrangement = {
+        ...arrangement,
+        selectedArrangementId: arrangementId,
+      }
+      setArrangement(nextArrangement)
+      sessionStorage.setItem('latestSeatingArrangement', JSON.stringify(nextArrangement))
+      setCurrentHall(0)
+    } catch (selectionError) {
+      setError(selectionError.message)
+    } finally {
+      setIsSelecting(false)
     }
   }
 
@@ -83,7 +116,15 @@ function PreviewPage() {
       >
         <section className="card empty-state">
           <h2>Generation failed</h2>
-          <p className="error-message">{generationFailure || arrangement.message}</p>
+          <p className="error-message">{arrangement.failureReason || generationFailure || arrangement.message}</p>
+          {arrangement.failureDetails && <p>{arrangement.failureDetails}</p>}
+          {arrangement.diagnostics && (
+            <div className="failure-diagnostics">
+              <span>Students <b>{arrangement.diagnostics.students}</b></span>
+              <span>Available Seats <b>{arrangement.diagnostics.availableSeats}</b></span>
+              <span>Shortfall <b>{arrangement.diagnostics.shortfall}</b></span>
+            </div>
+          )}
           <div className="button-row">
             <button className="primary-button" type="button" onClick={handleRegenerate} disabled={isRegenerating}>
               {isRegenerating && <span className="spinner" aria-hidden="true"></span>}
@@ -96,8 +137,8 @@ function PreviewPage() {
     )
   }
 
-  const warnings = arrangement.warnings || []
-  const showRelaxedWarning = arrangement.constraintsRelaxed || warnings.length > 0
+  const warnings = activeArrangement.warnings || []
+  const showRelaxedWarning = activeArrangement.constraintsRelaxed || warnings.length > 0
 
   return (
     <PageContainer
@@ -106,6 +147,12 @@ function PreviewPage() {
       description="Inspect the generated seating grid and approve it for PDF generation."
       actions={<span className="pill">{currentHall + 1} of {halls.length}</span>}
     >
+      <ArrangementComparison
+        arrangements={alternatives}
+        selectedId={selectedId}
+        onSelect={handleSelectArrangement}
+        isSelecting={isSelecting}
+      />
       <section className="card preview-card">
         <div className="section-title">
           <div>
@@ -150,6 +197,7 @@ function PreviewPage() {
           </button>
         </div>
       </section>
+      <AiEvaluationPanel arrangement={activeArrangement} />
     </PageContainer>
   )
 }

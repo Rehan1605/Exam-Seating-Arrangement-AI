@@ -284,6 +284,73 @@ input:focus {
   margin: 0;
 }
 
+.dashboard-info-grid,
+.evaluation-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.dashboard-info-grid .card,
+.evaluation-layout .card {
+  margin-bottom: 0;
+}
+
+.architecture-card h2,
+.search-card h2,
+.evaluation-card h2 {
+  margin: 0 0 16px;
+}
+
+.architecture-flow {
+  display: grid;
+  gap: 4px;
+}
+
+.architecture-flow div {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.architecture-flow span {
+  width: min(100%, 260px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbff;
+  color: var(--primary-dark);
+  font-weight: 800;
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.architecture-flow b {
+  color: var(--primary);
+}
+
+.search-card ul,
+.reasoning-trace {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.search-card li {
+  display: grid;
+  gap: 3px;
+  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+}
+
+.search-card li:last-child {
+  border-bottom: 0;
+}
+
+.search-card li span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .nav-card {
   min-height: 190px;
   display: flex;
@@ -500,6 +567,125 @@ th {
   padding: 10px 14px;
 }
 
+.arrangement-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.arrangement-option {
+  min-height: 112px;
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbff;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 16px;
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.arrangement-option:hover {
+  border-color: #9bbcf1;
+  transform: translateY(-2px);
+}
+
+.arrangement-option.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.arrangement-option span,
+.arrangement-option strong,
+.arrangement-option small {
+  display: block;
+}
+
+.arrangement-option span {
+  font-weight: 800;
+}
+
+.arrangement-option strong {
+  color: var(--primary-dark);
+  font-size: 18px;
+}
+
+.arrangement-option small {
+  color: var(--muted);
+}
+
+.evaluation-layout {
+  margin-top: 22px;
+}
+
+.evaluation-card.wide-card,
+.trace-card {
+  grid-column: span 2;
+}
+
+.score-value {
+  display: block;
+  color: var(--primary);
+  font-size: 36px;
+  line-height: 1;
+}
+
+.compact-list,
+.quality-grid,
+.failure-diagnostics {
+  display: grid;
+  gap: 10px;
+}
+
+.compact-list span,
+.quality-grid span,
+.failure-diagnostics span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+
+.quality-grid,
+.failure-diagnostics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.reasoning-trace {
+  display: grid;
+  gap: 12px;
+  counter-reset: trace;
+}
+
+.reasoning-trace li {
+  position: relative;
+  border-left: 2px solid #b9d2f8;
+  color: #385371;
+  padding: 2px 0 2px 32px;
+}
+
+.reasoning-trace li::before {
+  content: counter(trace);
+  counter-increment: trace;
+  position: absolute;
+  left: -13px;
+  top: -1px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .seating-grid {
   display: grid;
   gap: 12px;
@@ -602,8 +788,15 @@ th {
   .login-panel,
   .dashboard-grid,
   .form-grid,
-  .options-grid {
+  .options-grid,
+  .dashboard-info-grid,
+  .evaluation-layout {
     grid-template-columns: 1fr;
+  }
+
+  .evaluation-card.wide-card,
+  .trace-card {
+    grid-column: span 1;
   }
 
   .stats-grid {
@@ -624,6 +817,12 @@ th {
   }
 
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .arrangement-options,
+  .quality-grid,
+  .failure-diagnostics {
     grid-template-columns: 1fr;
   }
 

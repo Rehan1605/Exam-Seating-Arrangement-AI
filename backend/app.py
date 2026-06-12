@@ -15,6 +15,7 @@ solver = SeatingSolver()
 students_store = []
 halls_store = []
 latest_arrangement = None
+latest_generation = None
 latest_pdf_path = None
 REPORTS_DIR = Path(__file__).parent / "reports"
 
@@ -28,7 +29,7 @@ def health_check():
 
 @app.post("/upload")
 def upload_students():
-    global students_store
+    global students_store, latest_arrangement, latest_generation, latest_pdf_path
 
     if "file" not in request.files:
         return jsonify({"error": "CSV file is required"}), 400
@@ -52,6 +53,9 @@ def upload_students():
 
     dataframe = dataframe[REQUIRED_STUDENT_COLUMNS].fillna("").astype(str)
     students_store = dataframe.to_dict(orient="records")
+    latest_arrangement = None
+    latest_generation = None
+    latest_pdf_path = None
 
     return jsonify({
         "message": "File uploaded successfully",
@@ -64,7 +68,7 @@ def upload_students():
 
 @app.post("/save-halls")
 def save_halls():
-    global halls_store
+    global halls_store, latest_arrangement, latest_generation, latest_pdf_path
 
     payload = request.get_json(silent=True) or {}
     halls = payload.get("halls", [])
@@ -93,6 +97,9 @@ def save_halls():
         })
 
     halls_store = normalized_halls
+    latest_arrangement = None
+    latest_generation = None
+    latest_pdf_path = None
 
     return jsonify({
         "message": "Hall configuration saved successfully",
@@ -108,6 +115,30 @@ def generate_seating():
 @app.post("/regenerate")
 def regenerate():
     return _generate(shuffle=True)
+
+
+@app.post("/select-arrangement")
+def select_arrangement():
+    global latest_arrangement, latest_pdf_path
+
+    if not latest_generation or latest_generation.get("success") is False:
+        return jsonify({"error": "Generate valid seating arrangements before selecting one"}), 400
+
+    payload = request.get_json(silent=True) or {}
+    arrangement_id = payload.get("arrangementId")
+    selected = next(
+        (item for item in latest_generation.get("arrangements", []) if item.get("id") == arrangement_id),
+        None,
+    )
+    if not selected:
+        return jsonify({"error": "Selected arrangement was not found"}), 404
+
+    latest_arrangement = selected
+    latest_pdf_path = None
+    return jsonify({
+        "message": f"{selected.get('label', 'Arrangement')} selected successfully",
+        "arrangement": selected,
+    })
 
 
 @app.post("/generate-pdf")
@@ -143,7 +174,7 @@ def download_pdf():
 
 
 def _generate(shuffle):
-    global latest_arrangement, latest_pdf_path
+    global latest_arrangement, latest_generation, latest_pdf_path
 
     if not students_store:
         return jsonify({"error": "Upload student CSV before generating seating"}), 400
@@ -152,17 +183,18 @@ def _generate(shuffle):
 
     payload = request.get_json(silent=True) or {}
     constraints = payload.get("constraints", payload)
-    latest_arrangement = solver.generate(students_store, halls_store, constraints, shuffle=shuffle)
+    latest_generation = solver.generate(students_store, halls_store, constraints, shuffle=shuffle)
+    latest_arrangement = latest_generation
     latest_pdf_path = None
 
-    if latest_arrangement.get("success") is False:
-        message = latest_arrangement["message"]
+    if latest_generation.get("success") is False:
+        message = latest_generation["message"]
     else:
         message = "Seating regenerated successfully" if shuffle else "Seating generated successfully"
 
     return jsonify({
         "message": message,
-        "arrangement": latest_arrangement,
+        "arrangement": latest_generation,
     })
 
 

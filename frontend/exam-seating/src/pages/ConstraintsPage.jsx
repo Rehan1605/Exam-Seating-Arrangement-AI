@@ -25,6 +25,7 @@ function ConstraintsPage() {
 
     try {
       const data = await generateSeating({ constraints })
+      sessionStorage.setItem('latestConstraints', JSON.stringify(constraints))
       sessionStorage.setItem('latestSeatingArrangement', JSON.stringify(data.arrangement))
       if (data.arrangement?.success === false) {
         sessionStorage.setItem('latestGenerationError', data.arrangement.message)

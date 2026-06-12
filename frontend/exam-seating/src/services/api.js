@@ -42,6 +42,16 @@ export async function regenerateSeating(payload) {
   return parseResponse(response)
 }
 
+export async function selectArrangement(arrangementId) {
+  const response = await safeFetch(`${API_BASE_URL}/select-arrangement`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ arrangementId }),
+  })
+
+  return parseResponse(response)
+}
+
 export async function generatePdf(payload = {}) {
   const response = await safeFetch(`${API_BASE_URL}/generate-pdf`, {
     method: 'POST',

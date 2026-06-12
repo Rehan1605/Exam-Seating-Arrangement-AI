@@ -1,5 +1,6 @@
 import random
 import re
+import time
 from copy import deepcopy
 
 
@@ -19,21 +20,87 @@ class SeatingSolver:
 
     def generate(self, students, halls, constraints=None, shuffle=False):
         constraints = constraints or {}
-        same_subject_mode = constraints.get("sameSubjectHandling", "prevent-adjacent")
-        include_diagonal = bool(constraints.get("includeDiagonalAdjacency", False))
-
         normalized_halls = self._normalize_halls(halls)
-        variables = self._build_variables(students, shuffle)
         seats = self._build_domains(normalized_halls)
 
-        if len(variables) > len(seats):
-            return self._failure(normalized_halls)
+        if len(students) > len(seats):
+            return self._failure(
+                normalized_halls,
+                students,
+                seats,
+                "Insufficient seating capacity",
+                f"{len(students)} students require seats, but only {len(seats)} usable seats are available.",
+            )
 
+        arrangements = []
+        signatures = set()
+        attempts = 5 if shuffle else 4
+        for attempt_index in range(attempts):
+            arrangement = self._solve_once(
+                students,
+                normalized_halls,
+                seats,
+                constraints,
+                randomize=shuffle or attempt_index > 0,
+                attempt_index=attempt_index,
+            )
+            if arrangement is None:
+                continue
+            signature = self._arrangement_signature(arrangement["halls"])
+            if signature in signatures:
+                continue
+            signatures.add(signature)
+            arrangement["id"] = f"arrangement-{len(arrangements) + 1}"
+            arrangement["label"] = f"Arrangement {chr(65 + len(arrangements))}"
+            arrangements.append(arrangement)
+            if len(arrangements) == 3:
+                break
+
+        if not arrangements:
+            return self._failure(
+                normalized_halls,
+                students,
+                seats,
+                "Same-subject separation constraints are too strict for available hall capacity",
+                "Seats are available, but no assignment satisfies the selected separation policy. Relax the policy or increase hall capacity.",
+            )
+
+        while len(arrangements) < 3:
+            duplicate = deepcopy(arrangements[-1])
+            duplicate["id"] = f"arrangement-{len(arrangements) + 1}"
+            duplicate["label"] = f"Arrangement {chr(65 + len(arrangements))}"
+            duplicate["warnings"] = ["The search space produced fewer than three unique valid layouts."]
+            arrangements.append(duplicate)
+
+        primary = deepcopy(arrangements[0])
+        primary["arrangements"] = arrangements
+        primary["selectedArrangementId"] = primary["id"]
+        return primary
+
+    def _solve_once(self, students, halls, seats, constraints, randomize, attempt_index):
+        same_subject_mode = constraints.get("sameSubjectHandling", "prevent-adjacent")
+        include_diagonal = bool(constraints.get("includeDiagonalAdjacency", False))
+        variables = self._build_variables(students, randomize)
         domains = {variable["id"]: list(seats) for variable in variables}
-        if shuffle:
+        if randomize:
             for domain in domains.values():
                 random.shuffle(domain)
 
+        self._metrics = {
+            "assignments": 0,
+            "backtracks": 0,
+            "pruned": 0,
+            "recursiveCalls": 0,
+            "mrvSelections": 0,
+        }
+        blocked_count = sum(len(hall["blockedSeats"]) for hall in halls)
+        self._trace = [
+            f"Loaded {len(students)} students as CSP variables.",
+            f"Loaded {len(halls)} halls with {len(seats)} usable seat-domain values.",
+            f"Preprocessed {blocked_count} blocked seats and removed them from domains.",
+            f"Applied same-subject policy: {same_subject_mode.replace('-', ' ')}.",
+        ]
+        started_at = time.perf_counter()
         assignment = self._backtrack(
             variables=variables,
             domains=domains,
@@ -41,14 +108,26 @@ class SeatingSolver:
             same_subject_mode=same_subject_mode,
             include_diagonal=include_diagonal,
         )
-
+        self._metrics["solveTime"] = round(time.perf_counter() - started_at, 4)
         if assignment is None:
-            return self._failure(normalized_halls)
+            return None
 
-        return self._build_output(normalized_halls, variables, assignment)
+        self._trace.extend([
+            f"MRV heuristic selected the next variable {self._metrics['mrvSelections']} times.",
+            f"Forward checking pruned {self._metrics['pruned']} invalid seat options.",
+            f"Backtracking recovered from {self._metrics['backtracks']} dead ends.",
+            f"Solution found after {self._metrics['recursiveCalls']} recursive calls.",
+        ])
+        output = self._build_output(halls, variables, assignment)
+        output.update(self._evaluate(output["halls"], halls, same_subject_mode, include_diagonal))
+        output["trace"] = list(self._trace)
+        output["metrics"] = dict(self._metrics)
+        output["searchAttempt"] = attempt_index + 1
+        return output
 
     def _backtrack(self, variables, domains, assignment, same_subject_mode, include_diagonal):
         """Recursive backtracking search over student-seat assignments."""
+        self._metrics["recursiveCalls"] += 1
         if len(assignment) == len(variables):
             return assignment
 
@@ -57,6 +136,7 @@ class SeatingSolver:
             return None
 
         for seat in list(domains[variable["id"]]):
+            self._metrics["assignments"] += 1
             if not self.is_valid_assignment(variable, seat, assignment, same_subject_mode, include_diagonal):
                 continue
 
@@ -84,6 +164,7 @@ class SeatingSolver:
             if result is not None:
                 return result
 
+        self._metrics["backtracks"] += 1
         return None
 
     def _forward_check(
@@ -107,6 +188,7 @@ class SeatingSolver:
             if variable_id in assignment:
                 continue
 
+            previous_size = len(domains[variable_id])
             domains[variable_id] = [seat for seat in domains[variable_id] if seat != assigned_seat]
 
             if self.check_subject_conflict(assigned_variable, variable, same_subject_mode):
@@ -116,6 +198,8 @@ class SeatingSolver:
                     include_diagonal=include_diagonal,
                 ))
                 domains[variable_id] = [seat for seat in domains[variable_id] if seat not in blocked_neighbors]
+
+            self._metrics["pruned"] += previous_size - len(domains[variable_id])
 
             if not domains[variable_id]:
                 return None
@@ -127,6 +211,7 @@ class SeatingSolver:
         unassigned = [variable for variable in variables if variable["id"] not in assignment]
         if not unassigned:
             return None
+        self._metrics["mrvSelections"] += 1
         return min(unassigned, key=lambda variable: len(domains[variable["id"]]))
 
     def is_valid_assignment(self, variable, seat, assignment, same_subject_mode, include_diagonal=False):
@@ -256,12 +341,47 @@ class SeatingSolver:
             "halls": output_halls,
         }
 
-    def _failure(self, halls):
+    def _failure(self, halls, students, seats, reason, details):
         return {
             "success": False,
             "message": NO_SOLUTION_MESSAGE,
+            "failureReason": reason,
+            "failureDetails": details,
+            "diagnostics": {
+                "students": len(students),
+                "availableSeats": len(seats),
+                "shortfall": max(0, len(students) - len(seats)),
+            },
             "constraintsRelaxed": False,
             "warnings": [],
+            "trace": [
+                f"Loaded {len(students)} students.",
+                f"Computed {len(seats)} usable seats.",
+                f"Search stopped: {reason}.",
+            ],
+            "metrics": {
+                "assignments": 0,
+                "backtracks": 0,
+                "pruned": 0,
+                "recursiveCalls": 0,
+                "mrvSelections": 0,
+                "solveTime": 0,
+            },
+            "confidence": 0,
+            "quality": {
+                "hallBalance": 0,
+                "utilization": 0,
+                "separation": 0,
+                "compliance": 100,
+            },
+            "utilityScore": 0,
+            "utilityBreakdown": {
+                "hallBalance": 0,
+                "subjectSeparation": 0,
+                "seatUtilization": 0,
+                "unusedSeatEfficiency": 0,
+            },
+            "arrangements": [],
             "halls": self._empty_halls(halls),
         }
 
@@ -283,6 +403,81 @@ class SeatingSolver:
                 "seating": seating,
             })
         return output_halls
+
+    def _evaluate(self, output_halls, normalized_halls, same_subject_mode, include_diagonal):
+        usable_capacity = sum(
+            hall["rows"] * hall["cols"] - len(hall["blockedSeats"])
+            for hall in normalized_halls
+        )
+        occupied_counts = [
+            sum(1 for row in hall["seating"] for seat in row if isinstance(seat, dict))
+            for hall in output_halls
+        ]
+        total_occupied = sum(occupied_counts)
+        utilization = self._percentage(total_occupied, usable_capacity)
+
+        active_counts = [count for count in occupied_counts if count > 0]
+        if len(active_counts) <= 1:
+            hall_balance = 100
+        else:
+            average = sum(active_counts) / len(active_counts)
+            deviation = sum(abs(count - average) for count in active_counts) / len(active_counts)
+            hall_balance = round(max(0, 100 - deviation / max(1, average) * 100), 1)
+
+        conflict_pairs = 0
+        comparable_pairs = 0
+        for hall_index, hall in enumerate(output_halls):
+            seat_lookup = {}
+            for row_index, row in enumerate(hall["seating"]):
+                for col_index, student in enumerate(row):
+                    if isinstance(student, dict):
+                        seat_lookup[(hall_index, row_index, col_index)] = student
+            for seat, student in seat_lookup.items():
+                for neighbor in self.get_neighboring_seats(seat, same_subject_mode, include_diagonal):
+                    if neighbor <= seat or neighbor not in seat_lookup:
+                        continue
+                    comparable_pairs += 1
+                    if seat_lookup[neighbor].get("Branch") == student.get("Branch"):
+                        conflict_pairs += 1
+
+        separation = 100 if comparable_pairs == 0 else round((1 - conflict_pairs / comparable_pairs) * 100, 1)
+        compliance = 100
+        unused_efficiency = utilization
+        breakdown = {
+            "hallBalance": round(hall_balance * 0.40, 1),
+            "subjectSeparation": round(separation * 0.30, 1),
+            "seatUtilization": round(utilization * 0.20, 1),
+            "unusedSeatEfficiency": round(unused_efficiency * 0.10, 1),
+        }
+        utility_score = round(sum(breakdown.values()), 1)
+        confidence = round(
+            hall_balance * 0.25 + utilization * 0.20 + separation * 0.35 + compliance * 0.20,
+            1,
+        )
+        return {
+            "confidence": confidence,
+            "quality": {
+                "hallBalance": hall_balance,
+                "utilization": utilization,
+                "separation": separation,
+                "compliance": compliance,
+            },
+            "utilityScore": utility_score,
+            "utilityBreakdown": breakdown,
+        }
+
+    def _arrangement_signature(self, halls):
+        return tuple(
+            seat.get("RollNo") if isinstance(seat, dict) else seat
+            for hall in halls
+            for row in hall["seating"]
+            for seat in row
+        )
+
+    def _percentage(self, value, total):
+        if total <= 0:
+            return 0
+        return round(value / total * 100, 1)
 
     def _student_by_id(self, variables, student_id):
         for variable in variables:
